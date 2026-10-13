@@ -298,7 +298,7 @@ export async function extractHighLevelPostContent(
     await navigateToHighLevelPost(page, postUrl);
     // Some cookie-authenticated portals use /products/... instead of /courses/products/...
     // Only retry when the expected lesson isn't rendered or returned by the middleware.
-    if (!capturedPost && !page.url().includes("/posts/")) {
+    if (!capturedPost) {
       const alternative = new URL(postUrl);
       alternative.pathname = alternative.pathname.replace("/courses/products/", "/products/");
       if (alternative.href !== postUrl) await page.goto(alternative.href, { timeout: 30000 });
@@ -339,32 +339,10 @@ export async function extractHighLevelPostContent(
       url, type: "audio/mpeg",
     }));
 
-  // For cookie-backed ClientPortal courses, the post endpoint exposes
-  // audio.url even when the browser never requests the MP3.
-  const token = await getAuthToken(page);
-  if (!token) {
-    try {
-      const apiUrl = `https://services.leadconnectorhq.com/clientportal-middleware/memberships/locations/${encodeURIComponent(locationId)}/posts/${encodeURIComponent(postId)}?source=courses`;
-      const response = await page.request.get(apiUrl, {
-        headers: {
-          "x-location-id": locationId,
-          "x-product-id": productId,
-          source: "courses",
-          Referer: postUrl,
-        },
-      });
-      if (response.ok()) {
-        capturedPost = await response.json();
-      } else {
-        console.warn(`Middleware post API returned HTTP ${response.status()}`);
-      }
-    } catch (error) {
-      console.warn("Middleware post API unavailable:", error instanceof Error ? error.message : String(error));
-    }
-  }
-
   // The legacy API is only available on Firebase-backed portals.
-  const postDetails = await fetchPostDetails(page, locationId, postId);
+  const postDetails = await getAuthToken(page)
+    ? await fetchPostDetails(page, locationId, postId)
+    : null;
 
   if (!postDetails && capturedPost) {
     // Middleware data may be a bare post or wrapped in { post: ... }.
