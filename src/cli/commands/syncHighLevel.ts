@@ -4,9 +4,9 @@ import { loadConfig } from "../../config/configManager.js";
 import type { VideoDownloadTask } from "../../downloader/index.js";
 import {
   getAuthenticatedSession,
-  hasValidFirebaseToken,
   isHighLevelLoginPage,
 } from "../../shared/auth.js";
+import { hasValidHighLevelSession } from "../../scraper/highlevel/auth.js";
 import { createShutdownManager } from "../../shared/shutdown.js";
 import {
   buildHighLevelCourseStructure,
@@ -137,7 +137,7 @@ export async function syncHighLevelCommand(
         domain,
         loginUrl: portalUrl,
         isLoginPage: isHighLevelLoginPage,
-        verifySession: hasValidFirebaseToken,
+        verifySession: hasValidHighLevelSession,
       },
       { headless: useHeadless }
     );
