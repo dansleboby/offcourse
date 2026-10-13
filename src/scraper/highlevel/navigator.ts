@@ -30,6 +30,7 @@ export interface HighLevelCategory {
   position: number;
   postCount: number;
   isLocked: boolean;
+  parentCategoryId?: string | null;
 }
 
 export interface HighLevelPost {
