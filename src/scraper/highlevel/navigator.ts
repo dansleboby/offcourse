@@ -1,4 +1,5 @@
 import type { Page, Response } from "playwright";
+import { parseMiddlewareCategories } from "./middlewareCategories.js";
 import {
   PortalSettingsResponseSchema,
   ProductResponseSchema,
@@ -449,6 +450,30 @@ export async function buildHighLevelCourseStructure(
     return null;
   }
 
+  // Modern cookie-authenticated portals return nested categories and posts in
+  // a single clientportal-middleware response. Capture it in the browser session.
+  // Do not log the payload: it includes user IDs and other account metadata.
+  let middlewareCatalog: HighLevelCourseStructure["categories"] | null = null;
+  const pendingCatalog = new Set<Promise<void>>();
+  const middlewareHandler = (response: Response): void => {
+    const requestUrl = response.url();
+    if (
+      !response.ok() ||
+      !requestUrl.includes("leadconnectorhq.com/clientportal-middleware/") ||
+      !requestUrl.includes("/user-purchase/categories") ||
+      !requestUrl.includes(productId ?? "")
+    ) return;
+    const task = (async () => {
+      try {
+        const parsed = parseMiddlewareCategories(await response.json());
+        if (parsed) middlewareCatalog = parsed;
+      } catch { /* optional fallback to the legacy API */ }
+    })();
+    pendingCatalog.add(task);
+    void task.finally(() => pendingCatalog.delete(task));
+  };
+  page.on("response", middlewareHandler);
+
   // Set up response interception to capture product data BEFORE navigation.
   const titleCapture = createHighLevelCourseTitleCapture(productId);
   page.on("response", titleCapture.responseHandler);
@@ -459,6 +484,9 @@ export async function buildHighLevelCourseStructure(
     timeout: 30000,
     waitUntil: "networkidle",
   });
+
+  page.off("response", middlewareHandler);
+  await Promise.allSettled([...pendingCatalog]);
 
   // Stop accepting new captures before awaiting the snapshot. Otherwise a
   // response arriving during the Firebase readiness wait can add work that is
@@ -533,7 +561,8 @@ export async function buildHighLevelCourseStructure(
 
   // Extract categories
   onProgress?.({ phase: "categories" });
-  const categories = await extractCategories(page, course.id, locationId);
+  const categories = middlewareCatalog ??
+    (await extractCategories(page, course.id, locationId));
 
   onProgress?.({ phase: "categories", totalCategories: categories.length });
 
@@ -557,7 +586,9 @@ export async function buildHighLevelCourseStructure(
       currentCategoryIndex: i,
     });
 
-    const posts = await extractPosts(page, course.id, category.id, locationId);
+    const posts = middlewareCatalog
+      ? (middlewareCatalog.find((entry) => entry.id === category.id)?.posts ?? [])
+      : await extractPosts(page, course.id, category.id, locationId);
 
     onProgress?.({
       phase: "posts",
@@ -570,6 +601,10 @@ export async function buildHighLevelCourseStructure(
       ...category,
       posts,
     });
+  }
+
+  if (categoriesWithPosts.length === 0) {
+    throw new Error("No HighLevel modules found: neither middleware catalog nor legacy API returned usable categories");
   }
 
   onProgress?.({ phase: "done" });
