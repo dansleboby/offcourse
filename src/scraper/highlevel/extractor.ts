@@ -292,7 +292,7 @@ export async function extractHighLevelPostContent(
     // Only retry when the expected lesson isn't rendered or returned by the middleware.
     if (!capturedPost && !page.url().includes("/posts/")) {
       const alternative = new URL(postUrl);
-      alternative.pathname = alternative.pathname.replace(/^\\/courses\\/products\\//, "/products/");
+      alternative.pathname = alternative.pathname.replace("/courses/products/", "/products/");
       if (alternative.href !== postUrl) await page.goto(alternative.href, { timeout: 30000 });
     }
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
