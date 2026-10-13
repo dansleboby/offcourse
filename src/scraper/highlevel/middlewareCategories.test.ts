@@ -18,6 +18,8 @@ describe("parseMiddlewareCategories", () => {
     ]);
     expect(parsed?.[2].posts.map((post) => post.id)).toEqual(["p1", "p2"]);
     expect(parsed?.[2].posts[0]?.categoryId).toBe("child");
+    expect(parsed?.[2].parentCategoryId).toBe("parent");
+    expect(parsed?.[0].parentCategoryId).toBeNull();
   });
 
   it("rejects a malformed catalog rather than treating it as an empty course", () => {
