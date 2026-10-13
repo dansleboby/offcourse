@@ -285,6 +285,7 @@ export async function syncHighLevelCommand(
     const videoTasks: VideoDownloadTask[] = [];
     let contentExtracted = 0;
     let skipped = 0;
+    let extractionFailed = 0;
 
     // Build list of posts to process with their metadata
     interface PostTask {
@@ -403,7 +404,12 @@ export async function syncHighLevelCommand(
                 post.title,
                 attachment.name
               );
-              await downloadFile(attachment.url, attachmentPath);
+              const download = await downloadFile(attachment.url, attachmentPath);
+              if (!download.success) {
+                throw new Error(
+                  `Attachment download failed (${attachment.name}): ${download.error ?? "unknown error"}`
+                );
+              }
             }
           }
 
@@ -431,6 +437,7 @@ export async function syncHighLevelCommand(
           database?.markLessonSkipped(stateId, "No video found");
         }
       } catch (error) {
+        extractionFailed++;
         if (database) markLessonFailure(database, stateId, error, "EXTRACTION_ERROR");
         const shortName = post.title.length > 30 ? post.title.substring(0, 27) + "..." : post.title;
         console.error(`\n   ⚠️ Error: ${shortName}`);
@@ -456,6 +463,7 @@ export async function syncHighLevelCommand(
     const contentParts: string[] = [];
     if (contentExtracted > 0) contentParts.push(chalk.green(`${contentExtracted} extracted`));
     if (skipped > 0) contentParts.push(chalk.gray(`${skipped} cached`));
+    if (extractionFailed > 0) contentParts.push(chalk.red(`${extractionFailed} failed`));
     console.log(`   Content: ${contentParts.join(", ")}`);
 
     // Phase 3: Download videos
@@ -475,6 +483,9 @@ export async function syncHighLevelCommand(
       await runRequestedTranscription(database, config, options, shutdown.shouldContinue);
     }
 
+    if (extractionFailed > 0) {
+      throw new Error(`HighLevel sync incomplete: ${extractionFailed} lesson(s) failed extraction`);
+    }
     console.log(chalk.green("\n✅ Sync complete!\n"));
     console.log(chalk.gray(`   Output: ${courseDir}\n`));
   } finally {
