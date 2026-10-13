@@ -310,6 +310,35 @@ export async function extractHighLevelPostContent(
     await Promise.allSettled([...pending]);
   }
 
+  // Some players defer the MP3 request until playback; inspect their source
+  // attributes and already loaded resource URLs as well as network requests.
+  const domAudioUrls = await page.evaluate(() => {
+    const found = new Set<string>();
+    const add = (value: string | null | undefined): void => {
+      if (!value) return;
+      try {
+        const url = new URL(value, document.baseURI).href;
+        if (/^https:\/\/cdn\.courses\.apisystem\.tech\/memberships\/[^/]+\/audios\/[^?#]+\.mp3(?:[?#]|$)/i.test(url)) {
+          found.add(url);
+        }
+      } catch { /* ignore malformed URLs */ }
+    };
+    for (const el of document.querySelectorAll("audio, audio source, [src], [data-src], a[href]")) {
+      add(el.getAttribute("src"));
+      add(el.getAttribute("data-src"));
+      add(el.getAttribute("href"));
+    }
+    for (const entry of performance.getEntriesByType("resource")) add(entry.name);
+    return [...found];
+  });
+  domAudioUrls.forEach((url) => audioUrls.add(url));
+  const audioAttachments = (): HighLevelPostContent["attachments"] =>
+    [...audioUrls].map((url, index) => ({
+      id: `audio-${index}`,
+      name: `lesson-audio-${index + 1}.mp3`,
+      url, type: "audio/mpeg",
+    }));
+
   // The legacy API is only available on Firebase-backed portals.
   const postDetails = await fetchPostDetails(page, locationId, postId);
 
@@ -329,7 +358,7 @@ export async function extractHighLevelPostContent(
         : await extractVideoFromPage(page);
       return {
         id: postId, title: source.title, description, htmlContent: description,
-        video, attachments: [], categoryId, productId,
+        video, attachments: audioAttachments(), categoryId, productId,
       };
     }
   }
@@ -361,11 +390,7 @@ export async function extractHighLevelPostContent(
       description: rendered.description,
       htmlContent: rendered.html,
       video,
-      attachments: [...audioUrls].map((url, index) => ({
-        id: `audio-${index}`,
-        name: `lesson-audio-${index + 1}.mp3`,
-        url, type: "audio/mpeg",
-      })),
+      attachments: audioAttachments(),
       categoryId,
       productId,
     };
