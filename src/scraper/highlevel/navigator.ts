@@ -233,7 +233,7 @@ export async function extractCourseDetails(
               return {
                 id: product.id ?? productId,
                 title,
-                description: product.description ?? "",
+                description: typeof product.description === "string" ? product.description : "",
                 slug: product.id ?? productId,
                 thumbnailUrl: product.posterImage ?? null,
                 instructor: product.instructor ?? null,
