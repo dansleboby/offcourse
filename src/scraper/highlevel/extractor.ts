@@ -266,10 +266,64 @@ export async function extractHighLevelPostContent(
   postId: string,
   categoryId: string
 ): Promise<HighLevelPostContent | null> {
-  await navigateToHighLevelPost(page, postUrl);
+  // Capture the modern middleware response while navigating: the API is called
+  // from the SPA, with its own cookie-based credentials and request headers.
+  // Never print captured responses, which can contain account metadata.
+  let capturedPost: unknown = null;
+  const pending = new Set<Promise<void>>();
+  const capturePost = (response: import("playwright").Response): void => {
+    const url = response.url();
+    if (
+      !response.ok() ||
+      !url.includes("leadconnectorhq.com/clientportal-middleware/") ||
+      !url.includes("/posts/") ||
+      !url.includes(postId)
+    ) return;
+    const task = (async () => {
+      try { capturedPost = await response.json(); } catch { /* non-JSON response */ }
+    })();
+    pending.add(task);
+    void task.finally(() => pending.delete(task));
+  };
+  page.on("response", capturePost);
+  try {
+    await navigateToHighLevelPost(page, postUrl);
+    // Some cookie-authenticated portals use /products/... instead of /courses/products/...
+    // Only retry when the expected lesson isn't rendered or returned by the middleware.
+    if (!capturedPost && !page.url().includes("/posts/")) {
+      const alternative = new URL(postUrl);
+      alternative.pathname = alternative.pathname.replace(/^\\/courses\\/products\\//, "/products/");
+      if (alternative.href !== postUrl) await page.goto(alternative.href, { timeout: 30000 });
+    }
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+  } finally {
+    page.off("response", capturePost);
+    await Promise.allSettled([...pending]);
+  }
 
-  // Fetch post details from API
+  // The legacy API is only available on Firebase-backed portals.
   const postDetails = await fetchPostDetails(page, locationId, postId);
+
+  if (!postDetails && capturedPost) {
+    // Middleware data may be a bare post or wrapped in { post: ... }.
+    const payload = capturedPost as Record<string, unknown>;
+    const source = payload && typeof payload.post === "object" && payload.post !== null
+      ? payload.post as Record<string, unknown>
+      : payload;
+    if (source && typeof source.title === "string") {
+      const description = typeof source.description === "string" ? source.description : null;
+      const videoInfo = source.video && typeof source.video === "object"
+        ? source.video as Record<string, unknown> : null;
+      const mediaUrl = typeof videoInfo?.url === "string" ? videoInfo.url : null;
+      const video: HighLevelVideoInfo | null = mediaUrl
+        ? { type: mediaUrl.includes(".m3u8") ? "hls" : "custom", url: mediaUrl }
+        : await extractVideoFromPage(page);
+      return {
+        id: postId, title: source.title, description, htmlContent: description,
+        video, attachments: [], categoryId, productId,
+      };
+    }
+  }
 
   if (!postDetails) {
     // Cookie-authenticated clientportal portals do not expose a Firebase token.
