@@ -270,6 +270,14 @@ export async function extractHighLevelPostContent(
   // from the SPA, with its own cookie-based credentials and request headers.
   // Never print captured responses, which can contain account metadata.
   let capturedPost: unknown = null;
+  const audioUrls = new Set<string>();
+  const captureAudio = (request: import("playwright").Request): void => {
+    const url = request.url();
+    if (/^https:\/\/cdn\.courses\.apisystem\.tech\/memberships\/[^/]+\/audios\/[^?#]+\.mp3(?:[?#]|$)/i.test(url)) {
+      audioUrls.add(url);
+    }
+  };
+  page.on("request", captureAudio);
   const pending = new Set<Promise<void>>();
   const capturePost = (response: import("playwright").Response): void => {
     const url = response.url();
@@ -298,6 +306,7 @@ export async function extractHighLevelPostContent(
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
   } finally {
     page.off("response", capturePost);
+    page.off("request", captureAudio);
     await Promise.allSettled([...pending]);
   }
 
@@ -342,7 +351,7 @@ export async function extractHighLevelPostContent(
       };
     });
     const video = await extractVideoFromPage(page);
-    if (!rendered.title && !rendered.html && !rendered.description && !video) {
+    if (!rendered.title && !rendered.html && !rendered.description && !video && audioUrls.size === 0) {
       console.error("Could not extract lesson content from API or rendered page");
       return null;
     }
@@ -352,7 +361,11 @@ export async function extractHighLevelPostContent(
       description: rendered.description,
       htmlContent: rendered.html,
       video,
-      attachments: [],
+      attachments: [...audioUrls].map((url, index) => ({
+        id: `audio-${index}`,
+        name: `lesson-audio-${index + 1}.mp3`,
+        url, type: "audio/mpeg",
+      })),
       categoryId,
       productId,
     };
