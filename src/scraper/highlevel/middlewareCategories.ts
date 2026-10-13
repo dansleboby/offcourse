@@ -77,6 +77,7 @@ export function parseMiddlewareCategories(
     title: label(cat),
     description: null,
     position: index,
+    parentCategoryId: cat.parentCategory ?? null,
     postCount: cat.posts?.length ?? 0,
     isLocked: cat.visibility === "locked" || !!cat.lockedBy,
     posts: (cat.posts ?? []).slice().sort(order).map((post, postIndex) => ({
