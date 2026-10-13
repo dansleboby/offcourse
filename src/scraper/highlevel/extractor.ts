@@ -272,8 +272,36 @@ export async function extractHighLevelPostContent(
   const postDetails = await fetchPostDetails(page, locationId, postId);
 
   if (!postDetails) {
-    console.error("Could not fetch post details");
-    return null;
+    // Cookie-authenticated clientportal portals do not expose a Firebase token.
+    // Extract only content actually rendered on the accessible lesson page.
+    await page.locator("body").waitFor({ state: "attached", timeout: 10000 });
+    const rendered = await page.evaluate(() => {
+      const text = (selector: string): string =>
+        document.querySelector(selector)?.textContent?.trim() ?? "";
+      const contentElement = document.querySelector(
+        ".post-content, .lesson-content, [class*='post-description'], article"
+      );
+      return {
+        title: text(".post-title, .lesson-title, h1, h2"),
+        html: contentElement?.innerHTML ?? null,
+        description: text(".post-description, .lesson-description") || null,
+      };
+    });
+    const video = await extractVideoFromPage(page);
+    if (!rendered.title && !rendered.html && !rendered.description && !video) {
+      console.error("Could not extract lesson content from API or rendered page");
+      return null;
+    }
+    return {
+      id: postId,
+      title: rendered.title || postId,
+      description: rendered.description,
+      htmlContent: rendered.html,
+      video,
+      attachments: [],
+      categoryId,
+      productId,
+    };
   }
 
   let video: HighLevelVideoInfo | null = null;
