@@ -299,11 +299,23 @@ export async function syncHighLevelCommand(
     }
     const postTasks: PostTask[] = [];
 
-    // Build task list and create module directories
+    // Preserve nested ClientPortal categories on disk. Empty parent modules
+    // still get directories; numbering is scoped to siblings, not the flat list.
+    const directories = new Map<string, string>();
+    const siblingPositions = new Map<string, number>();
     for (const [catIndex, category] of courseStructure.categories.entries()) {
       if (category.isLocked) continue;
 
-      const moduleDir = await createModuleDirectory(courseDir, catIndex, category.title);
+      const parentDir = category.parentCategoryId
+        ? directories.get(category.parentCategoryId)
+        : undefined;
+      const rootOrParent = parentDir ?? courseDir;
+      const key = parentDir ?? "__root__";
+      const siblingIndex = siblingPositions.get(key) ?? 0;
+      siblingPositions.set(key, siblingIndex + 1);
+      const ownTitle = parentDir ? category.title.split(" / ").at(-1) ?? category.title : category.title;
+      const moduleDir = await createModuleDirectory(rootOrParent, siblingIndex, ownTitle);
+      directories.set(category.id, moduleDir);
 
       for (const [postIndex, post] of category.posts.entries()) {
         const postUrl = getHighLevelPostUrl(
