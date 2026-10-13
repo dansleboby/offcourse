@@ -588,7 +588,7 @@ export async function buildHighLevelCourseStructure(
 
     // Categories from middleware already contain their posts. TypeScript cannot
     // infer assignments made inside the asynchronous network response callback.
-    const posts = middlewareCatalog !== null
+    const posts = "posts" in category && Array.isArray(category.posts)
       ? category.posts
       : await extractPosts(page, course.id, category.id, locationId);
 
