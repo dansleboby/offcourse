@@ -278,36 +278,70 @@ export async function extractHighLevelPostContent(
     }
   };
   page.on("request", captureAudio);
-  const pending = new Set<Promise<void>>();
-  const capturePost = (response: import("playwright").Response): void => {
-    const url = response.url();
-    if (
-      !response.ok() ||
-      !url.includes("leadconnectorhq.com/clientportal-middleware/") ||
-      !url.includes("/posts/") ||
-      !url.includes(postId)
-    ) return;
-    const task = (async () => {
-      try { capturedPost = await response.json(); } catch { /* non-JSON response */ }
-    })();
-    pending.add(task);
-    void task.finally(() => pending.delete(task));
-  };
-  page.on("response", capturePost);
+  // Wait for the exact post API response before deciding whether navigation
+  // succeeded. A callback reading response.json() can still be pending after goto.
+  const apiPostPath =
+    `/clientportal-middleware/memberships/locations/${locationId}/posts/${postId}`;
+  const cookieAuthenticated = (await page.context().cookies(postUrl)).some(
+    (cookie) => cookie.name === "catv2"
+  );
+  const alternateUrl = new URL(postUrl);
+  alternateUrl.pathname = alternateUrl.pathname.replace(
+    "/courses/products/",
+    "/products/"
+  );
+  const urls = cookieAuthenticated && alternateUrl.href !== postUrl
+    ? [postUrl, alternateUrl.href]
+    : [postUrl];
+
   try {
-    await navigateToHighLevelPost(page, postUrl);
-    // Some cookie-authenticated portals use /products/... instead of /courses/products/...
-    // Only retry when the expected lesson isn't rendered or returned by the middleware.
-    if (!capturedPost) {
-      const alternative = new URL(postUrl);
-      alternative.pathname = alternative.pathname.replace("/courses/products/", "/products/");
-      if (alternative.href !== postUrl) await page.goto(alternative.href, { timeout: 30000 });
+    for (const url of urls) {
+      const postResponsePromise = cookieAuthenticated
+        ? page.waitForResponse(
+            (response) => {
+              try {
+                return new URL(response.url()).pathname === apiPostPath;
+              } catch {
+                return false;
+              }
+            },
+            { timeout: 8000 }
+          ).catch(() => null)
+        : Promise.resolve(null);
+
+      try {
+        await page.goto(url, { timeout: 30000, waitUntil: "domcontentloaded" });
+      } catch (error) {
+        if (url === urls[urls.length - 1]) throw error;
+        continue;
+      }
+
+      if (!cookieAuthenticated) {
+        await waitForFirebaseAccessTokenFromPage(page);
+        break;
+      }
+
+      const response = await postResponsePromise;
+      if (response?.ok()) {
+        try {
+          const data: unknown = await response.json();
+          if (data && typeof data === "object") {
+            const root = data as Record<string, unknown>;
+            const post = root.post && typeof root.post === "object"
+              ? root.post as Record<string, unknown>
+              : root;
+            if (post.id === postId) {
+              capturedPost = data;
+              break;
+            }
+          }
+        } catch {
+          // Retry with the other known route, then fall back to the DOM.
+        }
+      }
     }
-    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
   } finally {
-    page.off("response", capturePost);
     page.off("request", captureAudio);
-    await Promise.allSettled([...pending]);
   }
 
   // Some players defer the MP3 request until playback; inspect their source
