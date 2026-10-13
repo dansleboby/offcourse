@@ -339,6 +339,30 @@ export async function extractHighLevelPostContent(
       url, type: "audio/mpeg",
     }));
 
+  // For cookie-backed ClientPortal courses, the post endpoint exposes
+  // audio.url even when the browser never requests the MP3.
+  const token = await getAuthToken(page);
+  if (!token) {
+    try {
+      const apiUrl = `https://services.leadconnectorhq.com/clientportal-middleware/memberships/locations/${encodeURIComponent(locationId)}/posts/${encodeURIComponent(postId)}?source=courses`;
+      const response = await page.request.get(apiUrl, {
+        headers: {
+          "x-location-id": locationId,
+          "x-product-id": productId,
+          source: "courses",
+          Referer: postUrl,
+        },
+      });
+      if (response.ok()) {
+        capturedPost = await response.json();
+      } else {
+        console.warn(`Middleware post API returned HTTP ${response.status()}`);
+      }
+    } catch (error) {
+      console.warn("Middleware post API unavailable:", error instanceof Error ? error.message : String(error));
+    }
+  }
+
   // The legacy API is only available on Firebase-backed portals.
   const postDetails = await fetchPostDetails(page, locationId, postId);
 
@@ -356,6 +380,18 @@ export async function extractHighLevelPostContent(
       const video: HighLevelVideoInfo | null = mediaUrl
         ? { type: mediaUrl.includes(".m3u8") ? "hls" : "custom", url: mediaUrl }
         : await extractVideoFromPage(page);
+      const audioInfo = source.audio && typeof source.audio === "object"
+        ? source.audio as Record<string, unknown> : null;
+      const audioPath = typeof audioInfo?.url === "string" ? audioInfo.url : null;
+      if (audioPath) {
+        const normalizedPath = audioPath.startsWith("/")
+          ? `https://cdn.courses.apisystem.tech${audioPath}`
+          : audioPath;
+        if (/^https:\/\/cdn\.courses\.apisystem\.tech\/memberships\/[^/]+\/audios\/[^?#]+\.mp3(?:[?#]|$)/i.test(normalizedPath)) {
+          audioUrls.clear(); // Prefer the post-specific API URL over incidental page requests.
+          audioUrls.add(normalizedPath);
+        }
+      }
       return {
         id: postId, title: source.title, description, htmlContent: description,
         video, attachments: audioAttachments(), categoryId, productId,
