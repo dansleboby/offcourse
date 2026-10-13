@@ -140,7 +140,8 @@ export type Post = z.infer<typeof PostSchema>;
 export const ProductSchema = z.object({
   id: z.string().optional(),
   title: z.string(),
-  description: z.string().optional(),
+  // ClientPortal may return null or rich-text objects here; the course title is independent.
+  description: z.unknown().optional(),
   posterImage: z.string().nullable().optional(),
   instructor: z.string().nullable().optional(),
   postCount: z.number().optional(),
@@ -151,7 +152,8 @@ export const ProductResponseSchema = z.object({
   // Also allow fields directly on root
   id: z.string().optional(),
   title: z.string().optional(),
-  description: z.string().optional(),
+  // ClientPortal may return null or rich-text objects here; the course title is independent.
+  description: z.unknown().optional(),
   posterImage: z.string().nullable().optional(),
   instructor: z.string().nullable().optional(),
   postCount: z.number().optional(),
